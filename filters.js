@@ -6,88 +6,74 @@ you may not use this file except in compliance with the License.
 WhatsAsena - Yusuf Usta
 */
 
-const Asena = require('../events');
-const {MessageType} = require('@adiwajshing/baileys');
-const FilterDb = require('./sql/filters');
-const Config = require('../config')
-const Language = require('../language');
-const Lang = Language.getString('filters');
+const config = require('../../config');
+const { DataTypes } = require('sequelize');
 
-var f_rep = ''
-if (Config.LANG == 'TR') f_rep = '*Filtre Ayarlandı ✅*'
-if (Config.LANG == 'EN') f_rep = '*Filter Setted ✅*'
-if (Config.LANG == 'AZ') f_rep = '*Filtr Düzəldildi ✅*'
-if (Config.LANG == 'ES') f_rep = '*Filtro Ajustado ✅*'
-if (Config.LANG == 'HI') f_rep = '*फ़िल्टर सेट ✅*'
-if (Config.LANG == 'RU') f_rep = '*Фильтр настроен ✅*'
-if (Config.LANG == 'ML') f_rep = '*ഫിൽട്ടർ സെറ്റ് ✅*'
-if (Config.LANG == 'ID') f_rep = '*Filter Set ✅*'
-if (Config.LANG == 'PT') f_rep = '*Filtro Ajustado ✅*'
+const FiltersDB = config.DATABASE.define('filter', {
+    chat: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    pattern: {
+        type: DataTypes.TEXT,
+        allowNull: false
+    },
+    text: {
+        type: DataTypes.TEXT,
+        allowNull: false
+    },
+    regex: {
+        type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false
+    }
+});
 
-Asena.addCommand({pattern: 'filter ?(.*)', fromMe: true, desc: Lang.FILTER_DESC}, (async (message, match) => {
-    Mat = match[1].match(/[\'\"\“](.*?)[\'\"\“]/gsm);
+async function getFilter(jid = null, filter = null) {
+    var Wher = {chat: jid};
+    if (filter !== null) Wher.push({pattern: filter});
+    var Msg = await FiltersDB.findAll({
+        where: Wher
+    });
 
-    if (Mat === null) {
-        filtreler = await FilterDb.getFilter(message.jid);
-        if (filtreler === false) {
-            await message.client.sendMessage(message.jid,Lang.NO_FILTER,MessageType.text)
-        } else {
-            var mesaj = Lang.FILTERS + '\n';
-            filtreler.map((filter) => mesaj += '```' + filter.dataValues.pattern + '```\n');
-            await message.client.sendMessage(message.jid,mesaj,MessageType.text);
-        }
-    } else if (message.reply_message && match[1] !== '') {
-        await FilterDb.setFilter(message.jid, match[1].replace(/['"“]+/g, ''), message.reply_message.text);
-        return await message.client.sendMessage(message.jid,f_rep,MessageType.text);
+    if (Msg.length < 1) {
+        return false;
     } else {
-        if (Mat.length < 2) {
-            return await message.client.sendMessage(message.jid,Lang.NEED_REPLY + ' ```.filter "test" "test two"',MessageType.text);
+        return Msg;
+    }
+}
+
+
+async function setFilter(jid = null, filter = null, tex = null, regx = false) {
+    var Msg = await FiltersDB.findAll({
+        where: {
+            chat: jid,
+            pattern: filter
         }
-        await FilterDb.setFilter(message.jid, Mat[0].replace(/['"“]+/g, ''), Mat[1].replace(/['"“]+/g, '').replace(/[#]+/g, '\n'), Mat[0][0] === "'" ? true : false);
-        await message.client.sendMessage(message.jid,Lang.FILTERED.format(Mat[0].replace(/['"]+/g, '')),MessageType.text);
-    }
-}));
+    });
 
-Asena.addCommand({pattern: 'stop ?(.*)', fromMe: true, desc: Lang.STOP_DESC}, (async (message, match) => {
-    match = match[1].match(/[\'\"\“](.*?)[\'\"\“]/gsm);
-    if (match === null) {
-        return await message.client.sendMessage(message.jid,Lang.NEED_REPLY + '\n*Example:* ```.stop "hello"```',MessageType.text)
-    }
-
-    del = await FilterDb.deleteFilter(message.jid, match[0].replace(/['"“]+/g, ''));
-    
-    if (!del) {
-        await message.client.sendMessage(message.jid,Lang.ALREADY_NO_FILTER, MessageType.text)
+    if (Msg.length < 1) {
+        return await FiltersDB.create({ chat: jid, pattern: filter, text: tex, regex: regx });
     } else {
-        await message.client.sendMessage(message.jid,Lang.DELETED, MessageType.text)
+        return await Msg[0].update({ chat: jid, pattern: filter, text: tex, regex: regx });
     }
-}));
+}
 
+async function deleteFilter(jid = null, filter) {
+    var Msg = await FiltersDB.findAll({
+        where: {
+            chat: jid,
+            pattern: filter
+        }
+    });
+    if (Msg.length < 1) {
+        return false;
+    } else {
+        return await Msg[0].destroy();
+    }
+}
 
-Asena.addCommand({on: 'text', fromMe: false}, (async (message, match) => {
-    var filtreler = await FilterDb.getFilter(message.jid);
-    if (!filtreler) return; 
-    return filtreler.map(
-        async (filter) => {
-            pattern = new RegExp(filter.dataValues.regex ? filter.dataValues.pattern : ('\\b(' + filter.dataValues.pattern + ')\\b'), 'gm');
-            if (message.message == filter.dataValues.pattern) {
-                await new Promise(r => setTimeout(r, 900));
-                return await message.client.sendMessage(message.jid,filter.dataValues.text, MessageType.text, {quoted: message.data});
-            }
-        }
-    );
-}));
-Asena.addCommand({on: 'text', fromMe: true, deleteCommand: false, dontAddCommandList: true}, (async (message, match) => {
-    var filtreler = await FilterDb.getFilter(message.jid);
-    if (!filtreler) return; 
-    return filtreler.map(
-        async (filter) => {
-            pattern = new RegExp(filter.dataValues.regex ? filter.dataValues.pattern : ('\\b(' + filter.dataValues.pattern + ')\\b'), 'gm');
-            var fo = message.message.replace('$', '')
-            if (fo == filter.dataValues.pattern && message.message.startsWith('$')) {
-                await new Promise(r => setTimeout(r, 100));
-                return await message.client.sendMessage(message.jid,filter.dataValues.text, MessageType.text, {quoted: message.data});
-            }
-        }
-    );
-}));
+module.exports = {
+    FiltersDB: FiltersDB,
+    getFilter: getFilter,
+    setFilter: setFilter,
+    deleteFilter: deleteFilter
+};
